@@ -15,6 +15,12 @@ cd english-russian-translator
 ```
 
 ### **2. Install Dependencies**
+
+On MacOS:
+```sh
+brew install cmake pkg-config
+```
+
 ```sh
 pip install -r requirements.txt
 ```

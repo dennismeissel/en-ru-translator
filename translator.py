@@ -25,18 +25,17 @@ This script also uses the following guidelines from Huggingface:
 
 import os
 import sys
+import time
 import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+import warnings
+warnings.filterwarnings("ignore")
 
 def get_device():
     """
     Determines which device to use:
-      - If mps is available,
-        returns "mps" (for Apple Silicon/MacBook MPS).
+      - If mps is available, returns "mps" (for Apple Silicon/MacBook MPS).
       - Else if CUDA is available, returns "cuda".
       - Otherwise, returns "cpu".
     """
@@ -59,6 +58,9 @@ def translate(text, direction, device):
     Returns:
       str: The translated text.
     """
+
+    start = time.time()
+
     if direction == "ru-en":
         model_name = "Helsinki-NLP/opus-mt-ru-en"
     elif direction == "en-ru":
@@ -66,8 +68,8 @@ def translate(text, direction, device):
     else:
         sys.exit("Error: Unsupported translation direction. Use 'ru-en' or 'en-ru'.")
 
-    # Load tokenizer and model from Huggingface
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    # Force use of the fast tokenizer (which typically avoids a SentencePiece dependency)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
     model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
     
     # Move model to the desired device if not CPU
@@ -82,10 +84,15 @@ def translate(text, direction, device):
     # Generate translation
     output_tokens = model.generate(**inputs)
     translated_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+
+    end = time.time()
+    print(f"Translation took {end - start:.2f} seconds.")
     return translated_text
 
 def main():
     device = get_device()
+
+    print("Using device: ", device)
     
     # Case 1: Command-line arguments (e.g. python translator.py "text" direction)
     if len(sys.argv) >= 3:
@@ -114,6 +121,7 @@ def main():
                 break
             result = translate(text, direction, device)
             print("Translation:", result)
+    
 
 if __name__ == "__main__":
     main()
