@@ -7,6 +7,7 @@ A command-line translator between **English and Russian**, using **Helsinki-NLP*
 
 ## Installation
 
+
 ### **1. Clone the Repository**
 ```sh
 git clone https://github.com/YOUR_USERNAME/english-russian-translator.git
@@ -17,6 +18,7 @@ cd english-russian-translator
 ```sh
 pip install -r requirements.txt
 ```
+
 
 ## Usage
 
