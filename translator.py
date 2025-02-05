@@ -52,12 +52,10 @@ def chunk_text(text, max_length_chars=MAX_CHUNK_SIZE):
     Returns:
       list[str]: A list of text chunks.
     """
-    # Use a simple regex to split into sentences.
     sentences = re.split(r'(?<=[.!?])\s+', text)
     chunks = []
     current_chunk = ""
     for sentence in sentences:
-        # If adding the sentence would exceed the limit, save the current chunk.
         if current_chunk and (len(current_chunk) + len(sentence) + 1 > max_length_chars):
             chunks.append(current_chunk)
             current_chunk = sentence
@@ -80,11 +78,9 @@ def translate_chunk(text_chunk, model, tokenizer, device):
     Returns:
       str: The translated text for the chunk.
     """
-    # Tokenize the text chunk
     inputs = tokenizer(text_chunk, return_tensors="pt")
     if device in ["cuda", "mps"]:
         inputs = {key: val.to(device) for key, val in inputs.items()}
-    # Generate translation for the chunk
     output_tokens = model.generate(**inputs)
     translated_chunk = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
     return translated_chunk
@@ -109,8 +105,40 @@ def translate_long_text(text, model, tokenizer, device, max_length_chars=MAX_CHU
     for chunk in chunks:
         translation = translate_chunk(chunk, model, tokenizer, device)
         translations.append(translation)
-    # Join the translated chunks with a space.
     return " ".join(translations)
+
+def translate_preserving_line_breaks(text, model, tokenizer, device, max_length_chars=MAX_CHUNK_SIZE):
+    """
+    Translates the input text while preserving original line breaks.
+    
+    The function splits the text by lines, and for each nonempty line,
+    it translates the line (using chunking if the line exceeds max_length_chars).
+    The translated lines are then rejoined with newline characters.
+    
+    Args:
+      text (str): The full input text.
+      model: The translation model.
+      tokenizer: The tokenizer.
+      device (str): Compute device ("mps", "cuda", or "cpu").
+      max_length_chars (int): Maximum allowed characters per chunk.
+      
+    Returns:
+      str: The translated text with preserved line breaks.
+    """
+    lines = text.splitlines()
+    translated_lines = []
+    for line in lines:
+        # If the line is empty, preserve the blank line.
+        if not line.strip():
+            translated_lines.append("")
+        else:
+            # If a single line is too long, further chunk it.
+            if len(line) > max_length_chars:
+                translated_line = translate_long_text(line, model, tokenizer, device, max_length_chars)
+            else:
+                translated_line = translate_chunk(line, model, tokenizer, device)
+            translated_lines.append(translated_line)
+    return "\n".join(translated_lines)
 
 def get_device():
     """
@@ -148,26 +176,14 @@ def translate(text, direction, device):
     else:
         sys.exit("Error: Unsupported translation direction. Use 'ru-en' or 'en-ru'.")
 
-    # Force use of the fast tokenizer (which typically avoids a SentencePiece dependency)
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
     model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
     
-    # Move model to the desired device if not CPU
     if device in ["cuda", "mps"]:
         model = model.to(device)
 
-    # If the text is long, translate it in chunks
-    if len(text) > MAX_CHUNK_SIZE:
-        translated_text = translate_long_text(text, model, tokenizer, device, MAX_CHUNK_SIZE)
-    else:
-        # Tokenize the input text
-        inputs = tokenizer(text, return_tensors="pt")
-        if device in ["cuda", "mps"]:
-            inputs = {key: val.to(device) for key, val in inputs.items()}
-    
-        # Generate translation
-        output_tokens = model.generate(**inputs)
-        translated_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+    # Use the new function to preserve line breaks in the translated output.
+    translated_text = translate_preserving_line_breaks(text, model, tokenizer, device, MAX_CHUNK_SIZE)
 
     end = time.time()
     print(f"Translation took {end - start:.2f} seconds.")
@@ -175,7 +191,6 @@ def translate(text, direction, device):
 
 def main():
     device = get_device()
-
     print("Using device: ", device)
     
     # Case 1: Command-line arguments (e.g. python translator.py "text" direction)
@@ -186,7 +201,6 @@ def main():
         print(result)
     # Case 2: Piped input (e.g. echo "text" | python translator.py direction)
     elif not sys.stdin.isatty():
-        # When input is piped, use the first command-line argument as the translation direction.
         if len(sys.argv) < 2:
             sys.exit("Error: Please provide the translation direction ('ru-en' or 'en-ru') as an argument.")
         direction = sys.argv[1]
@@ -204,7 +218,7 @@ def main():
             if text.lower() == "exit":
                 break
             result = translate(text, direction, device)
-            print("Translation:", result)
+            print("Translation:\n", result)
     
 
 if __name__ == "__main__":
