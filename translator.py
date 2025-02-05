@@ -26,11 +26,91 @@ This script also uses the following guidelines from Huggingface:
 import os
 import sys
 import time
+import re
 import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 import warnings
 warnings.filterwarnings("ignore")
+
+# Maximum chunk size in characters. Adjust this value so that each chunk,
+# after tokenization, fits within the model's maximum token limit.
+MAX_CHUNK_SIZE = 500
+
+def chunk_text(text, max_length_chars=MAX_CHUNK_SIZE):
+    """
+    Splits the input text into chunks without breaking sentences.
+    
+    The function splits the text on sentence-ending punctuation
+    (period, exclamation point, question mark) followed by whitespace,
+    and then groups sentences into chunks that are at most max_length_chars long.
+    
+    Args:
+      text (str): The input text to be chunked.
+      max_length_chars (int): The maximum number of characters allowed per chunk.
+      
+    Returns:
+      list[str]: A list of text chunks.
+    """
+    # Use a simple regex to split into sentences.
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    chunks = []
+    current_chunk = ""
+    for sentence in sentences:
+        # If adding the sentence would exceed the limit, save the current chunk.
+        if current_chunk and (len(current_chunk) + len(sentence) + 1 > max_length_chars):
+            chunks.append(current_chunk)
+            current_chunk = sentence
+        else:
+            current_chunk = sentence if not current_chunk else current_chunk + " " + sentence
+    if current_chunk:
+        chunks.append(current_chunk)
+    return chunks
+
+def translate_chunk(text_chunk, model, tokenizer, device):
+    """
+    Translates a single text chunk using the provided model and tokenizer.
+    
+    Args:
+      text_chunk (str): A chunk of text to translate.
+      model: The loaded translation model.
+      tokenizer: The corresponding tokenizer.
+      device (str): Compute device ("mps", "cuda", or "cpu").
+      
+    Returns:
+      str: The translated text for the chunk.
+    """
+    # Tokenize the text chunk
+    inputs = tokenizer(text_chunk, return_tensors="pt")
+    if device in ["cuda", "mps"]:
+        inputs = {key: val.to(device) for key, val in inputs.items()}
+    # Generate translation for the chunk
+    output_tokens = model.generate(**inputs)
+    translated_chunk = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+    return translated_chunk
+
+def translate_long_text(text, model, tokenizer, device, max_length_chars=MAX_CHUNK_SIZE):
+    """
+    Translates a long text by splitting it into manageable chunks,
+    translating each chunk, and then joining the results.
+    
+    Args:
+      text (str): The long input text to translate.
+      model: The loaded translation model.
+      tokenizer: The corresponding tokenizer.
+      device (str): Compute device ("mps", "cuda", or "cpu").
+      max_length_chars (int): Maximum number of characters per chunk.
+      
+    Returns:
+      str: The full translated text.
+    """
+    chunks = chunk_text(text, max_length_chars)
+    translations = []
+    for chunk in chunks:
+        translation = translate_chunk(chunk, model, tokenizer, device)
+        translations.append(translation)
+    # Join the translated chunks with a space.
+    return " ".join(translations)
 
 def get_device():
     """
@@ -76,14 +156,18 @@ def translate(text, direction, device):
     if device in ["cuda", "mps"]:
         model = model.to(device)
 
-    # Tokenize the input text
-    inputs = tokenizer(text, return_tensors="pt")
-    if device in ["cuda", "mps"]:
-        inputs = {key: val.to(device) for key, val in inputs.items()}
-
-    # Generate translation
-    output_tokens = model.generate(**inputs)
-    translated_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+    # If the text is long, translate it in chunks
+    if len(text) > MAX_CHUNK_SIZE:
+        translated_text = translate_long_text(text, model, tokenizer, device, MAX_CHUNK_SIZE)
+    else:
+        # Tokenize the input text
+        inputs = tokenizer(text, return_tensors="pt")
+        if device in ["cuda", "mps"]:
+            inputs = {key: val.to(device) for key, val in inputs.items()}
+    
+        # Generate translation
+        output_tokens = model.generate(**inputs)
+        translated_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
 
     end = time.time()
     print(f"Translation took {end - start:.2f} seconds.")
